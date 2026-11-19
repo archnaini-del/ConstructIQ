@@ -6,105 +6,170 @@
 <title>ConstructIQ</title>
 
 <style>
-body{
-font-family: Arial, sans-serif;
+*{
 margin:0;
-background:#f4f7fa;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,sans-serif;
+}
+
+body{
+background:#f5f7fa;
 color:#333;
 }
 
 .hero{
-background:#0b3c5d;
+background:linear-gradient(135deg,#002b45,#005f73);
 color:white;
-padding:80px 20px;
+padding:120px 20px;
 text-align:center;
 }
 
 .hero h1{
-font-size:48px;
-margin-bottom:10px;
+font-size:64px;
+margin-bottom:20px;
 }
 
 .hero p{
-font-size:20px;
+font-size:24px;
+max-width:800px;
+margin:auto;
+}
+
+.btn{
+display:inline-block;
+margin-top:30px;
+padding:15px 30px;
+background:#ff8c42;
+color:white;
+text-decoration:none;
+border-radius:8px;
+font-weight:bold;
 }
 
 .section{
-max-width:1000px;
-margin:40px auto;
+max-width:1200px;
+margin:60px auto;
 padding:20px;
+}
+
+.cards{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+gap:20px;
 }
 
 .card{
 background:white;
 padding:25px;
-margin-bottom:20px;
 border-radius:10px;
-box-shadow:0 2px 8px rgba(0,0,0,0.1);
+box-shadow:0 4px 15px rgba(0,0,0,0.08);
 }
 
-ul{
-line-height:1.8;
+.card h3{
+margin-bottom:10px;
 }
 
 .footer{
+background:#002b45;
+color:white;
 text-align:center;
 padding:30px;
-background:#eee;
+margin-top:60px;
 }
 </style>
 </head>
 
 <body>
 
-<div class="hero">
+<section class="hero">
 <h1>ConstructIQ</h1>
-<p>AI-Powered Construction Intelligence Platform</p>
-</div>
+<p>
+AI-Powered Construction Intelligence Platform for Tender Reviews, Programme Analysis, Cost Management and Project Controls.
+</p>
 
-<div class="section">
+<a href="https://www.linkedin.com/in/ali-anvarinaeini-0aa30818/" class="btn">
+Request Demo
+</a>
+</section>
+
+<section class="section">
+
+<h2 style="text-align:center;margin-bottom:40px;">
+Platform Modules
+</h2>
+
+<div class="cards">
 
 <div class="card">
-<h2>What We Do</h2>
+<h3>Tender Intelligence</h3>
 <p>
-ConstructIQ helps contractors, developers and project teams automate
-tender reviews, programme analysis, cost management, project reporting
-and document control using Artificial Intelligence.
+Review tender packages, identify scope gaps, analyse risks and improve bid quality.
 </p>
 </div>
 
 <div class="card">
-<h2>Key Features</h2>
-<ul>
-<li>AI Tender Review</li>
-<li>Construction Cost Forecasting</li>
-<li>Programme Risk Analysis</li>
-<li>Document Intelligence</li>
-<li>Project Performance Dashboards</li>
-</ul>
+<h3>Programme Intelligence</h3>
+<p>
+Analyse construction programmes, identify delays and highlight critical path risks.
+</p>
 </div>
 
 <div class="card">
+<h3>Cost Intelligence</h3>
+<p>
+Track budgets, forecast costs and identify commercial risks early.
+</p>
+</div>
+
+<div class="card">
+<h3>Document Intelligence</h3>
+<p>
+Search and analyse drawings, specifications and project records with AI.
+</p>
+</div>
+
+</div>
+
+</section>
+
+<section class="section">
+
+<div class="card">
+
 <h2>Who We Serve</h2>
+
+<br>
+
 <p>
-Construction Contractors, Developers, Consultants,
-Infrastructure and Engineering Projects.
+Contractors, Developers, Consultants, Engineering Firms and Infrastructure Projects.
 </p>
+
 </div>
+
+</section>
+
+<section class="section">
 
 <div class="card">
-<h2>Vision</h2>
+
+<h2>Our Vision</h2>
+
+<br>
+
 <p>
-To bring AI-powered decision support to every construction project,
-improving productivity, reducing risk and enhancing project outcomes.
+Bring AI-powered decision support to every construction project and improve planning, delivery and commercial outcomes.
 </p>
-</div>
 
 </div>
 
-<div class="footer">
-ConstructIQ © 2026
-</div>
+</section>
+
+<footer class="footer">
+
+<p>ConstructIQ © 2026</p>
+
+</footer>
 
 </body>
 </html>
