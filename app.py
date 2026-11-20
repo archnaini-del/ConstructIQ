@@ -1,7 +1,6 @@
-```python
 """
 ConstructIQ Tender Intelligence
-Phase 3: Multi-PDF text extraction + GPT-4o-mini tender analysis.
+Phase 3: Multi-PDF text extraction + Azure OpenAI (GPT-4o-mini) tender analysis.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from typing import Callable, Optional
 
 import openai
 import streamlit as st
-from openai import OpenAI
+from openai import AzureOpenAI
 from pypdf import PdfReader
 
 # ----------------------------------------------------------------------------
@@ -30,8 +29,13 @@ MAX_FILES = 20
 PREVIEW_CHARS = 3000
 DOC_PREVIEW_CHARS = 1500
 
-# OpenAI
-OPENAI_MODEL = "gpt-4o-mini"
+# Azure OpenAI
+AZURE_API_VERSION = "2024-10-21"  # GA API version that supports JSON mode
+AZURE_ENV_VARS = (
+    "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_DEPLOYMENT_NAME",
+)
 MAX_OUTPUT_TOKENS = 8000
 MAX_CHARS_PER_REQUEST = 150_000   # ~35-50k tokens, well inside the 128k context window
 MAX_CHUNKS = 12                   # hard cap on cost/time for very large tender packs
@@ -203,7 +207,7 @@ def extract_text_from_multiple_pdfs(
 
 
 # ----------------------------------------------------------------------------
-# AI analysis (Phase 3)
+# AI analysis (Phase 3, Azure OpenAI)
 # ----------------------------------------------------------------------------
 class AnalysisError(Exception):
     """Raised with a user-friendly message when analysis cannot complete."""
@@ -248,15 +252,28 @@ FIELD GUIDANCE
 """
 
 
-def get_api_key() -> Optional[str]:
-    """Read the OpenAI key from the environment, then Streamlit secrets."""
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
+def _read_setting(name: str) -> Optional[str]:
+    """Read a setting from the environment, then Streamlit secrets."""
+    value = os.environ.get(name)
+    if not value:
         try:
-            key = st.secrets.get("OPENAI_API_KEY")
+            value = st.secrets.get(name)
         except Exception:  # no secrets file configured
-            key = None
-    return key.strip() if key else None
+            value = None
+    return str(value).strip() if value else None
+
+
+def get_azure_config() -> tuple[Optional[dict], list[str]]:
+    """Return (config, missing_variable_names). config is None if anything is missing."""
+    values = {name: _read_setting(name) for name in AZURE_ENV_VARS}
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        return None, missing
+    return {
+        "endpoint": values["AZURE_OPENAI_ENDPOINT"].rstrip("/"),
+        "api_key": values["AZURE_OPENAI_API_KEY"],
+        "deployment": values["AZURE_OPENAI_DEPLOYMENT_NAME"],
+    }, []
 
 
 def split_text(text: str, max_chars: int) -> list[str]:
@@ -320,11 +337,11 @@ def _merge_prompt(partials: list[dict]) -> str:
     )
 
 
-def _call_model(client: OpenAI, user_prompt: str) -> tuple[dict, int]:
+def _call_model(client: AzureOpenAI, deployment: str, user_prompt: str) -> tuple[dict, int]:
     """One JSON-mode call. Returns (parsed_json, total_tokens_used)."""
     try:
         response = client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=deployment,  # on Azure this is the DEPLOYMENT name
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
@@ -334,26 +351,44 @@ def _call_model(client: OpenAI, user_prompt: str) -> tuple[dict, int]:
             max_tokens=MAX_OUTPUT_TOKENS,
         )
     except openai.AuthenticationError:
-        raise AnalysisError("OpenAI rejected the API key. Check OPENAI_API_KEY.")
-    except openai.RateLimitError as exc:
-        if getattr(exc, "code", None) == "insufficient_quota":
-            raise AnalysisError(
-                "Your OpenAI account has no remaining quota. Check billing and usage limits."
-            )
         raise AnalysisError(
-            "OpenAI rate limit reached. Wait a minute and try again. "
-            "Very large tender packs may need a higher usage tier."
+            "Azure OpenAI rejected the API key. Check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT."
+        )
+    except openai.PermissionDeniedError:
+        raise AnalysisError(
+            "Azure OpenAI denied access. Check the key's permissions and any network restrictions on the resource."
+        )
+    except openai.NotFoundError:
+        raise AnalysisError(
+            "Azure OpenAI deployment not found. Check AZURE_OPENAI_DEPLOYMENT_NAME "
+            "(use the deployment name, not the model name) and AZURE_OPENAI_ENDPOINT."
+        )
+    except openai.RateLimitError:
+        raise AnalysisError(
+            "Azure OpenAI rate limit or quota reached. Wait a minute and try again. "
+            "You can raise the deployment's tokens-per-minute quota in Azure AI Foundry."
         )
     except openai.APITimeoutError:
-        raise AnalysisError("The request to OpenAI timed out. Please try again.")
+        raise AnalysisError("The request to Azure OpenAI timed out. Please try again.")
     except openai.APIConnectionError:
-        raise AnalysisError("Could not connect to OpenAI. Check your internet connection.")
+        raise AnalysisError(
+            "Could not connect to Azure OpenAI. Check AZURE_OPENAI_ENDPOINT and your internet connection."
+        )
     except openai.BadRequestError as exc:
-        if getattr(exc, "code", None) == "context_length_exceeded":
+        code = getattr(exc, "code", None)
+        if code == "context_length_exceeded":
             raise AnalysisError("The tender text exceeded the model's context limit.")
-        raise AnalysisError(f"OpenAI rejected the request: {exc}")
+        if code == "content_filter":
+            raise AnalysisError(
+                "The request was blocked by the Azure OpenAI content filter. "
+                "Review the deployment's content filtering settings."
+            )
+        raise AnalysisError(f"Azure OpenAI rejected the request: {exc}")
     except openai.APIStatusError as exc:
-        raise AnalysisError(f"OpenAI service error (HTTP {exc.status_code}). Please try again.")
+        raise AnalysisError(f"Azure OpenAI service error (HTTP {exc.status_code}). Please try again.")
+
+    if not response.choices:
+        raise AnalysisError("Azure OpenAI returned no response. Please try again.")
 
     choice = response.choices[0]
     if choice.finish_reason == "length":
@@ -361,6 +396,8 @@ def _call_model(client: OpenAI, user_prompt: str) -> tuple[dict, int]:
             "The AI response was cut off before it finished. "
             "Try again, or analyse fewer documents."
         )
+    if choice.finish_reason == "content_filter":
+        raise AnalysisError("The AI response was blocked by the Azure OpenAI content filter.")
 
     content = choice.message.content
     if not content:
@@ -442,11 +479,11 @@ def normalise_analysis(data: dict) -> dict:
 
 def analyse_tender(
     merged_text: str,
-    api_key: str,
+    config: dict,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> tuple[dict, dict]:
     """
-    Analyse merged tender text with GPT-4o-mini.
+    Analyse merged tender text with Azure OpenAI GPT-4o-mini.
 
     Small tenders: one request.
     Large tenders: split into parts, analyse each, then consolidate with a final request.
@@ -462,7 +499,14 @@ def analyse_tender(
             progress_callback(message)
 
     started = time.time()
-    client = OpenAI(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=4)
+    deployment = config["deployment"]
+    client = AzureOpenAI(
+        azure_endpoint=config["endpoint"],
+        api_key=config["api_key"],
+        api_version=AZURE_API_VERSION,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        max_retries=4,
+    )
 
     chunks = split_text(text, MAX_CHARS_PER_REQUEST)
     truncated = False
@@ -475,17 +519,17 @@ def analyse_tender(
 
     if total_parts == 1:
         notify("Analysing tender documents…")
-        raw, used = _call_model(client, _single_prompt(chunks[0]))
+        raw, used = _call_model(client, deployment, _single_prompt(chunks[0]))
         total_tokens += used
     else:
         partials = []
         for i, chunk in enumerate(chunks, start=1):
             notify(f"Analysing part {i} of {total_parts}…")
-            part_raw, used = _call_model(client, _chunk_prompt(chunk, i, total_parts))
+            part_raw, used = _call_model(client, deployment, _chunk_prompt(chunk, i, total_parts))
             total_tokens += used
             partials.append(normalise_analysis(part_raw))
         notify("Consolidating findings…")
-        raw, used = _call_model(client, _merge_prompt(partials))
+        raw, used = _call_model(client, deployment, _merge_prompt(partials))
         total_tokens += used
 
     result = normalise_analysis(raw)
@@ -495,7 +539,7 @@ def analyse_tender(
         raise AnalysisError("The AI returned an empty analysis. Please try again.")
 
     meta = {
-        "model": OPENAI_MODEL,
+        "model": f"Azure OpenAI · {deployment}",
         "parts": total_parts,
         "chars_analysed": sum(len(c) for c in chunks),
         "chars_total": len(text),
@@ -826,12 +870,14 @@ def render_analysis_section(batch: ExtractionBatch) -> None:
     section("🤖 AI Tender Analysis")
 
     merged_text = st.session_state.get("merged_text", "")
-    api_key = get_api_key()
+    azure_config, missing_vars = get_azure_config()
 
-    if not api_key:
+    if not azure_config:
         st.error(
-            "OpenAI API key not found. Set the `OPENAI_API_KEY` environment variable "
-            "or add it to `.streamlit/secrets.toml`, then restart the app."
+            "Azure OpenAI is not configured. Missing: "
+            + ", ".join(f"`{name}`" for name in missing_vars)
+            + ". Set them as environment variables or in `.streamlit/secrets.toml`, "
+            "then restart the app."
         )
     if not merged_text:
         st.info("There is no extracted text to analyse yet.")
@@ -842,7 +888,7 @@ def render_analysis_section(batch: ExtractionBatch) -> None:
         )
 
     st.caption(
-        "Extracted text is sent to OpenAI for analysis. Only analyse documents you are "
+        "Extracted text is sent to Azure OpenAI for analysis. Only analyse documents you are "
         "permitted to share with a third-party service."
     )
 
@@ -850,7 +896,7 @@ def render_analysis_section(batch: ExtractionBatch) -> None:
         "Analyse Tender",
         type="primary",
         icon="🔍",
-        disabled=not (merged_text and api_key),
+        disabled=not (merged_text and azure_config),
     )
 
     if clicked:
@@ -861,7 +907,7 @@ def render_analysis_section(batch: ExtractionBatch) -> None:
             ):
                 result, meta = analyse_tender(
                     merged_text,
-                    api_key,
+                    azure_config,
                     progress_callback=lambda msg: status_slot.info(msg),
                 )
             st.session_state["analysis_result"] = result
@@ -948,4 +994,3 @@ def main() -> None:
 
 
 main()
-```
