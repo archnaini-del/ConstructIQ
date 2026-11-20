@@ -1,2 +1,2 @@
-streamlit
-pypdf
+streamlit>=1.36,<2
+pypdf>=4.2,<7
